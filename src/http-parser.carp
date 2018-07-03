@@ -1,0 +1,31 @@
+(local-include "../lib/http-parser-helper.h")
+
+(use Array)
+
+(register-type HttpHeader
+  [name String
+   value String])
+
+
+(defmodule HttpHeader
+  (register prn (λ [HttpHeader] String)))
+
+
+(register-type HttpRequest
+  [method String
+   path String
+   version Int
+   headers (Array HttpHeader)
+   ])
+(register-type HttpResponse
+  [minor_version Int
+   status Int
+   msg String
+   headers (Array HttpHeader)
+   ])
+
+
+(defmodule HttpParser
+  (register parse-request (λ [(Array Char)] HttpRequest))
+  (register parse-response (λ [(Array Char)] HttpResponse))
+  )

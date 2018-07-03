@@ -1,0 +1,6 @@
+(local-include "../lib/hmac-sha1-helper.h")
+(Project.config "libflag" "-lcrypto")
+
+(defmodule HmacSha1
+  (register digest (λ [&String &String] String))
+  )

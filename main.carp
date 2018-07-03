@@ -1,0 +1,453 @@
+(Project.config "title" "openapi-client")
+(Project.config "compiler" "gcc -lm -O3")
+;;(Project.config "search-path" "lib/socket")
+
+(load "src/hmac-sha1.carp")
+(use HmacSha1)
+(use IO)
+
+(load "src/sockets.carp")
+(use Socket)
+
+(load "src/system-ext.carp")
+(use System)
+
+(load "src/http-parser.carp")
+(use HttpParser)
+
+;; (defn main []
+;;   (Socket.with-server sock @"127.0.0.1" 8080
+;;     (Socket.while-connection sock client (send client (read client)))))
+
+(def app-key "4b71f4fd1dec2809940abe0c558d6fc6")
+(def app-secret "d88986f75ee86951e59b49cff68244f90ae0b3e7eafdf19681b6b61f57fc7e91")
+
+(deftype Context
+    [
+     prog String
+     host String
+     port Int
+     box String
+     cmd String
+     board Int
+     lock Int
+     locks (Array Int)
+     speaker Int
+     audio Int
+     heart-rate Int
+     timeout Int
+     ])
+
+(defn header->string [header]
+  (fmt "%s: %s\r\n" (HttpHeader.name header) (HttpHeader.value header)))
+
+(defn headers->string [headers]
+  (String.concat &(Array.copy-map header->string &(the (Array HttpHeader) headers))))
+
+(defn join-less-than [x]
+  (String.concat &[@"> " @x @"\n"]))
+
+(defn join-greater-than [x]
+  (String.concat &[@"< " @x @"\n"]))
+
+(defn print-request [content]
+  (println &(String.concat &(Array.copy-map join-less-than &(String.lines content)))))
+
+(defn print-response [content]
+  (println &(String.concat &(Array.copy-map join-greater-than &(String.lines content)))))
+
+(defn get [sock host path headers]
+  (let-do [request &(fmt "GET %s HTTP/1.1\r\nHost: %s\r\nContent-Length: 0\r\n%s\r\n" path host &(headers->string headers))]
+    (Socket.send sock request)
+    (print-request request)
+    (Socket.read sock)))
+
+(defn put [sock host path headers body]
+  (let-do [request &(fmt "PUT %s HTTP/1.1\r\nHost: %s\r\nContent-Length: %d\r\n%s\r\n%s" path host (String.length body) &(headers->string headers) body)]
+    (Socket.send sock request)
+    (print-request request)
+    (Socket.read sock)))
+
+(defn post [sock host path headers body]
+  (let-do [request &(fmt "POST %s HTTP/1.1\r\nHost: %s\r\nContent-Length: %d\r\n%s\r\n%s" path host (String.length body) &(headers->string headers) body)]
+    (Socket.send sock request)
+    (print-request request)
+    (Socket.read sock)))
+
+(defn lock-off [sock host box board lock]
+  (let-do [signature (HmacSha1.digest app-secret &(String.concat &[@"lock-off/" @box @"/locks/" (Int.str board) @"/" (Int.str lock)]))
+        auth (HttpHeader.init @"Authorization" (String.concat &[@app-key @":" signature]))
+        date (HttpHeader.init @"Date" @"")
+        result &(put sock host &(String.concat &[@"/" @box @"/locks/" (Int.str board) @"/" (Int.str lock)]) [auth date] "")]
+    (println &(String.concat &[@"lock-off/" @box @"/locks/" (Int.str board) @"/" (Int.str lock)]))
+    (print-response result)))
+
+(defn comma-join-lock [lock]
+  (format ",%d" @(the &Int lock)))
+
+(defn locks-off [sock host box board locks]
+  (let [body &(String.concat &[@"locks=" (String.suffix-string &(String.concat &(Array.copy-map comma-join-lock (the &(Array Int) locks))) 1)])
+        signature (HmacSha1.digest app-secret &(String.concat &[@"locks-off/" @box @"/locks/" (Int.str board) @body]))
+        auth (HttpHeader.init @"Authorization" (String.concat &[@app-key @":" signature]))
+        date (HttpHeader.init @"Date" @"")
+        result &(post sock host &(String.concat &[@"/" @box @"/locks/" (Int.str board)]) [(HttpHeader.init @"Content-Type" @"application/x-www-form-urlencoded") auth date] body)]
+    (print-response result)))
+
+(defn lock-status [sock host box board lock]
+  (let [signature (HmacSha1.digest app-secret &(String.concat &[@"lock-status/" @box @"/locks/" (Int.str board) @"/" (Int.str lock)]))
+        auth (HttpHeader.init @"Authorization" (String.concat &[@app-key @":" signature]))
+        date (HttpHeader.init @"Date" @"")
+        result &(get sock host &(String.concat &[@"/" @box @"/locks/" (Int.str board) @"/" (Int.str lock)]) [auth date])]
+    (print-response result)))
+
+(defn light-on [sock host box]
+  (let [signature (HmacSha1.digest app-secret &(String.concat &[@"light-on/" @box @"/light/on"]))
+        auth (HttpHeader.init @"Authorization" (String.concat &[@app-key @":" signature]))
+        date (HttpHeader.init @"Date" @"")
+        result &(put sock host &(String.concat &[@"/" @box @"/light/on"]) [auth date] "")]
+    (print-response result)))
+
+(defn light-off [sock host box]
+  (let [signature (HmacSha1.digest app-secret &(String.concat &[@"light-off/" @box @"/light/off"]))
+        auth (HttpHeader.init @"Authorization" (String.concat &[@app-key @":" signature]))
+        date (HttpHeader.init @"Date" @"")
+        result &(put sock host &(String.concat &[@"/" @box @"/light/off"]) [auth date] "")]
+    (print-response result)))
+
+(defn ultraviolet-on [sock host box]
+  (let [signature (HmacSha1.digest app-secret &(String.concat &[@"ultraviolet-on/" @box @"/ultraviolet/on"]))
+        auth (HttpHeader.init @"Authorization" (String.concat &[@app-key @":" signature]))
+        date (HttpHeader.init @"Date" @"")
+        result &(put sock host &(String.concat &[@"/" @box @"/ultraviolet/on"]) [auth date] "")]
+    (print-response result)))
+
+(defn ultraviolet-off [sock host box]
+  (let [signature (HmacSha1.digest app-secret &(String.concat &[@"ultraviolet-off/" @box @"/ultraviolet/off"]))
+        auth (HttpHeader.init @"Authorization" (String.concat &[@app-key @":" signature]))
+        date (HttpHeader.init @"Date" @"")
+        result &(put sock host &(String.concat &[@"/" @box @"/ultraviolet/off"]) [auth date] "")]
+    (print-response result)))
+
+(defn camera-on [sock host box]
+  (let [signature (HmacSha1.digest app-secret &(String.concat &[@"camera-on/" @box @"/camera/on"]))
+        auth (HttpHeader.init @"Authorization" (String.concat &[@app-key @":" signature]))
+        date (HttpHeader.init @"Date" @"")
+        result &(put sock host &(String.concat &[@"/" @box @"/camera/on"]) [auth date] "")]
+    (print-response result)))
+
+(defn camera-off [sock host box]
+  (let [signature (HmacSha1.digest app-secret &(String.concat &[@"camera-off/" @box @"/camera/off"]))
+        auth (HttpHeader.init @"Authorization" (String.concat &[@app-key @":" signature]))
+        date (HttpHeader.init @"Date" @"")
+        result &(put sock host &(String.concat &[@"/" @box @"/camera/off"]) [auth date] "")]
+    (print-response result)))
+
+(defn fan-on [sock host box]
+  (let [signature (HmacSha1.digest app-secret &(String.concat &[@"fan-on/" @box @"/fan/on"]))
+        auth (HttpHeader.init @"Authorization" (String.concat &[@app-key @":" signature]))
+        date (HttpHeader.init @"Date" @"")
+        result &(put sock host &(String.concat &[@"/" @box @"/fan/on"]) [auth date] "")]
+    (print-response result)))
+
+(defn fan-off [sock host box]
+  (let [signature (HmacSha1.digest app-secret &(String.concat &[@"fan-off/" @box @"/fan/off"]))
+        auth (HttpHeader.init @"Authorization" (String.concat &[@app-key @":" signature]))
+        date (HttpHeader.init @"Date" @"")
+        result &(put sock host &(String.concat &[@"/" @box @"/fan/off"]) [auth date] "")]
+    (print-response result)))
+
+(defn play [sock host box speaker audio]
+  (let [signature (HmacSha1.digest app-secret &(String.concat &[@"play/" @box @"/speakers/" (Int.str speaker) @"/audios/" (Int.str audio)]))
+        auth (HttpHeader.init @"Authorization" (String.concat &[@app-key @":" signature]))
+        date (HttpHeader.init @"Date" @"")
+        result &(put sock host &(String.concat &[@"/" @box @"/speakers/" (Int.str speaker) @"/audios/" (Int.str audio)]) [auth date] "")]
+    (print-response result)))
+
+(defn volume-up [sock host box speaker]
+  (let [signature (HmacSha1.digest app-secret &(String.concat &[@"volume-up/" @box @"/speakers/" (Int.str speaker) @"/volume/up"]))
+        auth (HttpHeader.init @"Authorization" (String.concat &[@app-key @":" signature]))
+        date (HttpHeader.init @"Date" @"")
+        result &(put sock host &(String.concat &[@"/" @box @"/speakers/" (Int.str speaker) @"/volume/up"]) [auth date] "")]
+    (print-response result)))
+
+(defn volume-down [sock host box speaker]
+  (let [signature (HmacSha1.digest app-secret &(String.concat &[@"volume-down/" @box @"/speakers/" (Int.str speaker) @"/volume/down"]))
+        auth (HttpHeader.init @"Authorization" (String.concat &[@app-key @":" signature]))
+        date (HttpHeader.init @"Date" @"")
+        result &(put sock host &(String.concat &[@"/" @box @"/speakers/" (Int.str speaker) @"/volume/down"]) [auth date] "")]
+    (print-response result)))
+
+(defn config-network [sock host box heart-rate timeout]
+  (let [body &(String.concat &[@"network-heart-rate=" (Int.str heart-rate) @"&network-timeout=" (Int.str timeout)])
+        signature (HmacSha1.digest app-secret &(String.concat &[@"config-network/" @box @"/network/" @body]))
+        auth (HttpHeader.init @"Authorization" (String.concat &[@app-key @":" signature]))
+        date (HttpHeader.init @"Date" @"")
+        result &(post sock host &(String.concat &[@"/" @box @"/network"]) [(HttpHeader.init @"Content-Type" @"application/x-www-form-urlencoded") auth date] body)]
+    (print-response result)))
+
+(defn token [sock host box board lock]
+  (let [signature (HmacSha1.digest app-secret &(String.concat &[@"get-token/" @box @"/token/" (Int.str board) @"/" (Int.str lock)]))
+        auth (HttpHeader.init @"Authorization" (String.concat &[@app-key @":" signature]))
+        date (HttpHeader.init @"Date" @"")
+        result &(get sock host &(String.concat &[@"/" @box @"/token/" (Int.str board) @"/" (Int.str lock)]) [auth date])]
+    (print-response result)))
+
+(defn tokens [sock host box board locks]
+  (let [lockstr &(String.suffix-string &(String.concat &(Array.copy-map comma-join-lock (the &(Array Int) locks))) 1)
+        signature (HmacSha1.digest app-secret &(String.concat &[@"get-token/" @box @"/token/" (Int.str board) @"/" @lockstr]))
+        auth (HttpHeader.init @"Authorization" (String.concat &[@app-key @":" signature]))
+        date (HttpHeader.init @"Date" @"")
+        result &(get sock host &(String.concat &[@"/" @box @"/token/" (Int.str board) @"/" @lockstr]) [auth date])]
+    (print-response result)))
+
+(defn online [sock host box]
+  (let [signature (HmacSha1.digest app-secret &(String.concat &[@"online-detect/" @box]))
+        auth (HttpHeader.init @"Authorization" (String.concat &[@app-key @":" signature]))
+        date (HttpHeader.init @"Date" @"")
+        result &(get sock host &(String.concat &[@"/" @box]) [auth date])]
+    (print-response result)))
+
+(defn ping [sock host box]
+  (let [signature (HmacSha1.digest app-secret &(String.concat &[@"ping/" @box]))
+        auth (HttpHeader.init @"Authorization" (String.concat &[@app-key @":" signature]))
+        date (HttpHeader.init @"Date" @"")
+        result &(put sock host &(String.concat &[@"/" @box]) [auth date] "")]
+    (print-response result)))
+
+(defn do-work [context]
+  (let-do [host (Context.host context)]
+    (Socket.with-client sock host @(Context.port context)
+      (let [box (Context.box context)
+            cmd (Context.cmd context)]
+        (cond
+          (String.= cmd "lock-off")
+          (lock-off sock host box @(Context.board context) @(Context.lock context))
+          (String.= cmd "locks-off")
+          (locks-off sock host box @(Context.board context) (Context.locks context))
+          (String.= cmd "lock-status")
+          (lock-status sock host box @(Context.board context) @(Context.lock context))
+          (String.= cmd "light-on")
+          (light-on sock host box)
+          (String.= cmd "light-off")
+          (light-off sock host box)
+          (String.= cmd "ultraviolet-on")
+          (ultraviolet-on sock host box)
+          (String.= cmd "ultraviolet-off")
+          (ultraviolet-off sock host box)
+          (String.= cmd "camera-on")
+          (camera-on sock host box)
+          (String.= cmd "camera-off")
+          (camera-off sock host box)
+          (String.= cmd "fan-on")
+          (fan-on sock host box)
+          (String.= cmd "fan-off")
+          (fan-off sock host box)
+          (String.= cmd "play")
+          (play sock host box @(Context.speaker context) @(Context.audio context))
+          (String.= cmd "volume-up")
+          (volume-up sock host box @(Context.speaker context))
+          (String.= cmd "volume-down")
+          (volume-down sock host box @(Context.speaker context))
+          (String.= cmd "config-network")
+          (config-network sock host box @(Context.heart-rate context) @(Context.timeout context))
+          (String.= cmd "token")
+          (token sock host box @(Context.board context) @(Context.lock context))
+          (String.= cmd "tokens")
+          (tokens sock host box @(Context.board context) (Context.locks context))
+          (String.= cmd "online")
+          (online sock host box)
+          (String.= cmd "ping")
+          (ping sock host box)
+          (println "Uknown cmd"))))))
+
+(defn usage [prog]
+  (do
+    (println &(String.format "Usage: %s [-host host] [-port port] <-box box> <command> [options]" prog))
+    (println "-host <string>")
+    (println "-port <number>                              (1~65535)")
+    (println "-box <string>")
+    (println "Command:")
+    (println "  lock-off")
+    (println "           -board <number>                  (1~8)")
+    (println "           -lock <number>                   (1~20)")
+    (println "  locks-off")
+    (println "           -board <number>                  (1~8)")
+    (println "           -locks <number1>,<number2>       (1~20)")
+    (println "  lock-status")
+    (println "           -board <number>                  (1~8)")
+    (println "           -lock <number>                   (1~20)")
+    (println "  light-on")
+    (println "  light-off")
+    (println "  ultraviolet-on")
+    (println "  ultraviolet-off")
+    (println "  camera-on")
+    (println "  camera-off")
+    (println "  fan-on")
+    (println "  fan-off")
+    (println "  play")
+    (println "           -speaker <number>                (1~8)")
+    (println "           -audio <number>                  (1~255)")
+    (println "  volume-up")
+    (println "           -speaker <number>                (1~8)")
+    (println "  volume-down")
+    (println "           -speaker <number>                (1~8)")
+    (println "  config-network")
+    (println "           -heart-rate <number>             [15, 31, 63, 127, 255]")
+    (println "           -timeout <number>                (600~90000)")
+    (println "  token")
+    (println "           -board <number>                  (1~8)")
+    (println "           -lock <number>                   (1~20)")
+    (println "  tokens")
+    (println "           -board <number>                  (1~8)")
+    (println "           -locks <number1>,<number2>       (1~20)")
+    (println "  online")
+    (println "  ping")))
+
+(defn board-in-region? [board]
+  (and (> board 0) (< board 9)))
+
+(defn lock-in-region? [lock]
+  (and (> lock 0) (< lock 21)))
+
+(defn speaker-in-region? [speaker]
+  (or (and (> speaker 0) (< speaker 9)) (= speaker 255)))
+
+(defn audio-in-region? [audio]
+  (and (> audio 0) (< audio 10000)))
+
+(defn heart-rate-in-region? [heart-rate]
+  (or* (= heart-rate 15) (= heart-rate 31) (= heart-rate 63) (= heart-rate 127) (= heart-rate 255)))
+
+(defn timeout-in-region? [timeout]
+  (and (> timeout 599) (< timeout 90001)))
+
+(defn reduce-lock-in-region [acc lock]
+  (and @acc (lock-in-region? @lock)))
+
+(defn verify-context [context]
+  (let [cmd (Context.cmd context)]
+    (and
+      (> (String.length (Context.box context)) 0)
+      (or* (and* (String.= "lock-off" cmd)
+             (board-in-region? @(Context.board context))
+             (lock-in-region? @(Context.lock context)))
+        (and* (String.= "lock-status" cmd)
+          (board-in-region? @(Context.board context))
+          (lock-in-region? @(Context.lock context)))
+        (and* (String.= "locks-off" cmd)
+          (board-in-region? @(Context.board context))
+          (> (Array.length (Context.locks context)) 0)
+          (Array.reduce reduce-lock-in-region true (Context.locks context)))
+        (and* (String.= "play" cmd)
+          (speaker-in-region? @(Context.speaker context))
+          (audio-in-region? @(Context.audio context)))
+        (and* (String.= "volume-up" cmd)
+          (speaker-in-region? @(Context.speaker context)))
+        (and* (String.= "volume-down" cmd)
+          (speaker-in-region? @(Context.speaker context)))
+        (and* (String.= "config-network" cmd)
+          (heart-rate-in-region? @(Context.heart-rate context))
+          (timeout-in-region? @(Context.timeout context)))
+        (and* (String.= "token" cmd)
+             (board-in-region? @(Context.board context))
+             (lock-in-region? @(Context.lock context)))
+        (and* (String.= "tokens" cmd)
+          (board-in-region? @(Context.board context))
+          (> (Array.length (Context.locks context)) 0)
+          (Array.reduce reduce-lock-in-region true (Context.locks context)))
+        (String.= "light-on" cmd)
+        (String.= "light-off" cmd)
+        (String.= "ultraviolet-on" cmd)
+        (String.= "ultraviolet-off" cmd)
+        (String.= "camera-on" cmd)
+        (String.= "camera-off" cmd)
+        (String.= "fan-on" cmd)
+        (String.= "fan-off" cmd)
+        (String.= "online" cmd)
+        (String.= "ping" cmd)))))
+
+(defn parse-args-recursive [context args i]
+  (if (= i (Array.length args))
+    context
+    (let [arg (Array.nth args i)]
+      (cond
+        (String.= "lock-off" arg)
+        (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
+        (String.= "locks-off" arg)
+        (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
+        (String.= "lock-status" arg)
+        (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
+        (String.= "light-on" arg)
+        (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
+        (String.= "light-off" arg)
+        (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
+        (String.= "ultraviolet-on" arg)
+        (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
+        (String.= "ultraviolet-off" arg)
+        (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
+        (String.= "camera-on" arg)
+        (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
+        (String.= "camera-off" arg)
+        (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
+        (String.= "fan-on" arg)
+        (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
+        (String.= "fan-off" arg)
+        (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
+        (String.= "play" arg)
+        (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
+        (String.= "volume-up" arg)
+        (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
+        (String.= "volume-down" arg)
+        (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
+        (String.= "config-network" arg)
+        (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
+        (String.= "token" arg)
+        (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
+        (String.= "tokens" arg)
+        (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
+        (String.= "online" arg)
+        (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
+        (String.= "ping" arg)
+        (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
+        (if (String.starts-with? arg "-")
+          (let [param &(String.suffix-string arg 1)]
+            (if (> (- (Array.length args) i) 1)
+              (let [value (Array.nth args (+ i 1))]
+                (cond
+                  (String.= "board" param)
+                  (parse-args-recursive (Context.set-board context (Int.from-string value)) args (+ i 2))
+                  (String.= "lock" param)
+                  (parse-args-recursive (Context.set-lock context (Int.from-string value)) args (+ i 2))
+                  (String.= "locks" param)
+                  (parse-args-recursive (Context.set-locks context (Array.copy-map Int.from-string &(String.split-by value &[\,]))) args (+ i 2))
+                  (String.= "speaker" param)
+                  (parse-args-recursive (Context.set-speaker context (Int.from-string value)) args (+ i 2))
+                  (String.= "audio" param)
+                  (parse-args-recursive (Context.set-audio context (Int.from-string value)) args (+ i 2))
+                  (String.= "host" param)
+                  (parse-args-recursive (Context.set-host context @value) args (+ i 2))
+                  (String.= "port" param)
+                  (parse-args-recursive (Context.set-port context (Int.from-string value)) args (+ i 2))
+                  (String.= "box" param)
+                  (parse-args-recursive (Context.set-box context @value) args (+ i 2))
+                  (String.= "heart-rate" param)
+                  (parse-args-recursive (Context.set-heart-rate context (Int.from-string value)) args (+ i 2))
+                  (String.= "timeout" param)
+                  (parse-args-recursive (Context.set-timeout context (Int.from-string value)) args (+ i 2))
+                  (parse-args-recursive context args (+ i 2))))
+              (parse-args-recursive context args (+ i 1))))
+          (parse-args-recursive context args (+ i 1)))))))
+
+(defn parse-args [prog args]
+  (let-do [context &(Context.init @prog @"palbox.fengchaohuzhu.com" 5080 @"" @"" 0 0 [0 0] 255 0 31 9000)
+           parsed &(parse-args-recursive @context args 0)]
+    (if (verify-context parsed)
+      (do-work parsed)
+      (usage prog))))
+
+(defn main []
+  (let [args (the (Ref (Array String)) &(System.arguments))]
+    (if (= (Array.length args) 1)
+      (usage (the (Ref String) &(Array.first args)))
+      (let [rest &(Array.suffix-array args 1)]
+        (parse-args (the (Ref String) &(Array.first args)) rest)))))

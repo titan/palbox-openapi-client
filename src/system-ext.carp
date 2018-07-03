@@ -1,0 +1,6 @@
+(local-include "../lib/system-helper.h")
+
+(defmodule System
+  (register getpid (λ [] Int))
+  (register arguments (λ [] (Array String)))
+  )
