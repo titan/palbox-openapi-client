@@ -3,4 +3,5 @@
 (defmodule System
   (register getpid (λ [] Int))
   (register arguments (λ [] (Array String)))
+  (register strftime (λ [&String Long] String))
   )

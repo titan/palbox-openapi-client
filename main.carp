@@ -1,5 +1,6 @@
 (Project.config "title" "openapi-client")
-(Project.config "compiler" "gcc -lm -O3")
+(Project.config "compiler" "gcc -lm")
+(Project.no-echo)
 ;;(Project.config "search-path" "lib/socket")
 
 (load "src/hmac-sha1.carp")
@@ -12,8 +13,8 @@
 (load "src/system-ext.carp")
 (use System)
 
-(load "src/http-parser.carp")
-(use HttpParser)
+;; (load "src/http-parser.carp")
+;; (use HttpParser)
 
 ;; (defn main []
 ;;   (Socket.with-server sock @"127.0.0.1" 8080
@@ -36,13 +37,12 @@
      audio Int
      heart-rate Int
      timeout Int
+     volume Int
      ])
 
-(defn header->string [header]
-  (fmt "%s: %s\r\n" (HttpHeader.name header) (HttpHeader.value header)))
-
-(defn headers->string [headers]
-  (String.concat &(Array.copy-map header->string &(the (Array HttpHeader) headers))))
+(defn RFC-1123-date [t]
+  (System.strftime "%a, %d %b %Y %H:%M:%S +0000" t)
+  )
 
 (defn join-less-than [x]
   (String.concat &[@"> " @x @"\n"]))
@@ -57,161 +57,192 @@
   (println &(String.concat &(Array.copy-map join-greater-than &(String.lines content)))))
 
 (defn get [sock host path headers]
-  (let-do [request &(fmt "GET %s HTTP/1.1\r\nHost: %s\r\nContent-Length: 0\r\n%s\r\n" path host &(headers->string headers))]
+  (let-do [headerstr (String.join @"\r\n" headers)
+           request &(String.concat &[@"GET " path @" HTTP/1.1\r\nHost: " host @"\r\nContent-Length: 0\r\n" headerstr @"\r\n\r\n"])]
     (Socket.send sock request)
     (print-request request)
     (Socket.read sock)))
 
 (defn put [sock host path headers body]
-  (let-do [request &(fmt "PUT %s HTTP/1.1\r\nHost: %s\r\nContent-Length: %d\r\n%s\r\n%s" path host (String.length body) &(headers->string headers) body)]
+  (let-do [headerstr (String.join @"\r\n" headers)
+           request &(String.concat &[@"PUT " path @" HTTP/1.1\r\nHost: " host @"\r\nContent-Length: " (Int.str (String.length &body)) @"\r\n" headerstr @"\r\n" body])]
     (Socket.send sock request)
     (print-request request)
     (Socket.read sock)))
 
 (defn post [sock host path headers body]
-  (let-do [request &(fmt "POST %s HTTP/1.1\r\nHost: %s\r\nContent-Length: %d\r\n%s\r\n%s" path host (String.length body) &(headers->string headers) body)]
+  (let-do [headerstr (String.join @"\r\n" headers)
+           request &(String.concat &[@"POST " path @" HTTP/1.1\r\nHost: " host @"\r\nContent-Length: " (Int.str (String.length &body)) @"\r\n" headerstr @"\r\n" body])]
     (Socket.send sock request)
     (print-request request)
     (Socket.read sock)))
 
 (defn lock-off [sock host box board lock]
-  (let-do [signature (HmacSha1.digest app-secret &(String.concat &[@"lock-off/" @box @"/locks/" (Int.str board) @"/" (Int.str lock)]))
-        auth (HttpHeader.init @"Authorization" (String.concat &[@app-key @":" signature]))
-        date (HttpHeader.init @"Date" @"")
-        result &(put sock host &(String.concat &[@"/" @box @"/locks/" (Int.str board) @"/" (Int.str lock)]) [auth date] "")]
-    (println &(String.concat &[@"lock-off/" @box @"/locks/" (Int.str board) @"/" (Int.str lock)]))
+  (let [datestr &(RFC-1123-date (Long.from-int (System.time)))
+        signature (HmacSha1.digest app-secret &(String.concat &[@"lock-off/" @box @"/locks/" (Int.str board) @"/" (Int.str lock) @datestr]))
+        auth (String.join @": " &[@"Authorization" (String.concat &[@app-key @":" signature])])
+        date (String.join @": " &[@"Date" @datestr])
+        result &(put sock @host (String.concat &[@"/" @box @"/locks/" (Int.str board) @"/" (Int.str lock)]) &[auth date] @"")]
     (print-response result)))
 
 (defn comma-join-lock [lock]
   (format ",%d" @(the &Int lock)))
 
 (defn locks-off [sock host box board locks]
-  (let [body &(String.concat &[@"locks=" (String.suffix-string &(String.concat &(Array.copy-map comma-join-lock (the &(Array Int) locks))) 1)])
-        signature (HmacSha1.digest app-secret &(String.concat &[@"locks-off/" @box @"/locks/" (Int.str board) @body]))
-        auth (HttpHeader.init @"Authorization" (String.concat &[@app-key @":" signature]))
-        date (HttpHeader.init @"Date" @"")
-        result &(post sock host &(String.concat &[@"/" @box @"/locks/" (Int.str board)]) [(HttpHeader.init @"Content-Type" @"application/x-www-form-urlencoded") auth date] body)]
+  (let [datestr &(RFC-1123-date (Long.from-int (System.time)))
+        body &(String.concat &[@"locks=" (String.suffix-string &(String.concat &(Array.copy-map comma-join-lock (the &(Array Int) locks))) 1)])
+        signature (HmacSha1.digest app-secret &(String.concat &[@"locks-off/" @box @"/locks/" (Int.str board) @body @datestr]))
+        auth (String.join @": " &[@"Authorization" (String.concat &[@app-key @":" signature])])
+        date (String.join @": " &[@"Date" @datestr])
+        content-type @"Content-Type: application/x-www-form-urlencoded"
+        result &(post sock @host (String.concat &[@"/" @box @"/locks/" (Int.str board)]) &[content-type auth date] @body)]
     (print-response result)))
 
 (defn lock-status [sock host box board lock]
-  (let [signature (HmacSha1.digest app-secret &(String.concat &[@"lock-status/" @box @"/locks/" (Int.str board) @"/" (Int.str lock)]))
-        auth (HttpHeader.init @"Authorization" (String.concat &[@app-key @":" signature]))
-        date (HttpHeader.init @"Date" @"")
-        result &(get sock host &(String.concat &[@"/" @box @"/locks/" (Int.str board) @"/" (Int.str lock)]) [auth date])]
+  (let [datestr &(RFC-1123-date (Long.from-int (System.time)))
+        signature (HmacSha1.digest app-secret &(String.concat &[@"lock-status/" @box @"/locks/" (Int.str board) @"/" (Int.str lock) @datestr]))
+        auth (String.join @": " &[@"Authorization" (String.concat &[@app-key @":" signature])])
+        date (String.join @": " &[@"Date" @datestr])
+        result &(get sock @host (String.concat &[@"/" @box @"/locks/" (Int.str board) @"/" (Int.str lock)]) &[auth date])]
     (print-response result)))
 
 (defn light-on [sock host box]
-  (let [signature (HmacSha1.digest app-secret &(String.concat &[@"light-on/" @box @"/light/on"]))
-        auth (HttpHeader.init @"Authorization" (String.concat &[@app-key @":" signature]))
-        date (HttpHeader.init @"Date" @"")
-        result &(put sock host &(String.concat &[@"/" @box @"/light/on"]) [auth date] "")]
+  (let [datestr &(RFC-1123-date (Long.from-int (System.time)))
+        signature (HmacSha1.digest app-secret &(String.concat &[@"light-on/" @box @"/light/on" @datestr]))
+        auth (String.join @": " &[@"Authorization" (String.concat &[@app-key @":" signature])])
+        date (String.join @": " &[@"Date" @datestr])
+        result &(put sock @host (String.concat &[@"/" @box @"/light/on"]) &[auth date] @"")]
     (print-response result)))
 
 (defn light-off [sock host box]
-  (let [signature (HmacSha1.digest app-secret &(String.concat &[@"light-off/" @box @"/light/off"]))
-        auth (HttpHeader.init @"Authorization" (String.concat &[@app-key @":" signature]))
-        date (HttpHeader.init @"Date" @"")
-        result &(put sock host &(String.concat &[@"/" @box @"/light/off"]) [auth date] "")]
+  (let [datestr &(RFC-1123-date (Long.from-int (System.time)))
+        signature (HmacSha1.digest app-secret &(String.concat &[@"light-off/" @box @"/light/off" @datestr]))
+        auth (String.join @": " &[@"Authorization" (String.concat &[@app-key @":" signature])])
+        date (String.join @": " &[@"Date" @datestr])
+        result &(put sock @host (String.concat &[@"/" @box @"/light/off"]) &[auth date] @"")]
     (print-response result)))
 
 (defn ultraviolet-on [sock host box]
-  (let [signature (HmacSha1.digest app-secret &(String.concat &[@"ultraviolet-on/" @box @"/ultraviolet/on"]))
-        auth (HttpHeader.init @"Authorization" (String.concat &[@app-key @":" signature]))
-        date (HttpHeader.init @"Date" @"")
-        result &(put sock host &(String.concat &[@"/" @box @"/ultraviolet/on"]) [auth date] "")]
+  (let [datestr &(RFC-1123-date (Long.from-int (System.time)))
+        signature (HmacSha1.digest app-secret &(String.concat &[@"ultraviolet-on/" @box @"/ultraviolet/on" @datestr]))
+        auth (String.join @": " &[@"Authorization" (String.concat &[@app-key @":" signature])])
+        date (String.join @": " &[@"Date" @datestr])
+        result &(put sock @host (String.concat &[@"/" @box @"/ultraviolet/on"]) &[auth date] @"")]
     (print-response result)))
 
 (defn ultraviolet-off [sock host box]
-  (let [signature (HmacSha1.digest app-secret &(String.concat &[@"ultraviolet-off/" @box @"/ultraviolet/off"]))
-        auth (HttpHeader.init @"Authorization" (String.concat &[@app-key @":" signature]))
-        date (HttpHeader.init @"Date" @"")
-        result &(put sock host &(String.concat &[@"/" @box @"/ultraviolet/off"]) [auth date] "")]
+  (let [datestr &(RFC-1123-date (Long.from-int (System.time)))
+        signature (HmacSha1.digest app-secret &(String.concat &[@"ultraviolet-off/" @box @"/ultraviolet/off" @datestr]))
+        auth (String.join @": " &[@"Authorization" (String.concat &[@app-key @":" signature])])
+        date (String.join @": " &[@"Date" @datestr])
+        result &(put sock @host (String.concat &[@"/" @box @"/ultraviolet/off"]) &[auth date] @"")]
     (print-response result)))
 
 (defn camera-on [sock host box]
-  (let [signature (HmacSha1.digest app-secret &(String.concat &[@"camera-on/" @box @"/camera/on"]))
-        auth (HttpHeader.init @"Authorization" (String.concat &[@app-key @":" signature]))
-        date (HttpHeader.init @"Date" @"")
-        result &(put sock host &(String.concat &[@"/" @box @"/camera/on"]) [auth date] "")]
+  (let [datestr &(RFC-1123-date (Long.from-int (System.time)))
+        signature (HmacSha1.digest app-secret &(String.concat &[@"camera-on/" @box @"/camera/on" @datestr]))
+        auth (String.join @": " &[@"Authorization" (String.concat &[@app-key @":" signature])])
+        date (String.join @": " &[@"Date" @datestr])
+        result &(put sock @host (String.concat &[@"/" @box @"/camera/on"]) &[auth date] @"")]
     (print-response result)))
 
 (defn camera-off [sock host box]
-  (let [signature (HmacSha1.digest app-secret &(String.concat &[@"camera-off/" @box @"/camera/off"]))
-        auth (HttpHeader.init @"Authorization" (String.concat &[@app-key @":" signature]))
-        date (HttpHeader.init @"Date" @"")
-        result &(put sock host &(String.concat &[@"/" @box @"/camera/off"]) [auth date] "")]
+  (let [datestr &(RFC-1123-date (Long.from-int (System.time)))
+        signature (HmacSha1.digest app-secret &(String.concat &[@"camera-off/" @box @"/camera/off" @datestr]))
+        auth (String.join @": " &[@"Authorization" (String.concat &[@app-key @":" signature])])
+        date (String.join @": " &[@"Date" @datestr])
+        result &(put sock @host (String.concat &[@"/" @box @"/camera/off"]) &[auth date] @"")]
     (print-response result)))
 
 (defn fan-on [sock host box]
-  (let [signature (HmacSha1.digest app-secret &(String.concat &[@"fan-on/" @box @"/fan/on"]))
-        auth (HttpHeader.init @"Authorization" (String.concat &[@app-key @":" signature]))
-        date (HttpHeader.init @"Date" @"")
-        result &(put sock host &(String.concat &[@"/" @box @"/fan/on"]) [auth date] "")]
+  (let [datestr &(RFC-1123-date (Long.from-int (System.time)))
+        signature (HmacSha1.digest app-secret &(String.concat &[@"fan-on/" @box @"/fan/on" @datestr]))
+        auth (String.join @": " &[@"Authorization" (String.concat &[@app-key @":" signature])])
+        date (String.join @": " &[@"Date" @datestr])
+        result &(put sock @host (String.concat &[@"/" @box @"/fan/on"]) &[auth date] @"")]
     (print-response result)))
 
 (defn fan-off [sock host box]
-  (let [signature (HmacSha1.digest app-secret &(String.concat &[@"fan-off/" @box @"/fan/off"]))
-        auth (HttpHeader.init @"Authorization" (String.concat &[@app-key @":" signature]))
-        date (HttpHeader.init @"Date" @"")
-        result &(put sock host &(String.concat &[@"/" @box @"/fan/off"]) [auth date] "")]
+  (let [datestr &(RFC-1123-date (Long.from-int (System.time)))
+        signature (HmacSha1.digest app-secret &(String.concat &[@"fan-off/" @box @"/fan/off" @datestr]))
+        auth (String.join @": " &[@"Authorization" (String.concat &[@app-key @":" signature])])
+        date (String.join @": " &[@"Date" @datestr])
+        result &(put sock @host (String.concat &[@"/" @box @"/fan/off"]) &[auth date] @"")]
     (print-response result)))
 
 (defn play [sock host box speaker audio]
-  (let [signature (HmacSha1.digest app-secret &(String.concat &[@"play/" @box @"/speakers/" (Int.str speaker) @"/audios/" (Int.str audio)]))
-        auth (HttpHeader.init @"Authorization" (String.concat &[@app-key @":" signature]))
-        date (HttpHeader.init @"Date" @"")
-        result &(put sock host &(String.concat &[@"/" @box @"/speakers/" (Int.str speaker) @"/audios/" (Int.str audio)]) [auth date] "")]
+  (let [datestr &(RFC-1123-date (Long.from-int (System.time)))
+        signature (HmacSha1.digest app-secret &(String.concat &[@"play/" @box @"/speakers/" (Int.str speaker) @"/audios/" (Int.str audio) @datestr]))
+        auth (String.join @": " &[@"Authorization" (String.concat &[@app-key @":" signature])])
+        date (String.join @": " &[@"Date" @datestr])
+        result &(put sock @host (String.concat &[@"/" @box @"/speakers/" (Int.str speaker) @"/audios/" (Int.str audio)]) &[auth date] @"")]
     (print-response result)))
 
 (defn volume-up [sock host box speaker]
-  (let [signature (HmacSha1.digest app-secret &(String.concat &[@"volume-up/" @box @"/speakers/" (Int.str speaker) @"/volume/up"]))
-        auth (HttpHeader.init @"Authorization" (String.concat &[@app-key @":" signature]))
-        date (HttpHeader.init @"Date" @"")
-        result &(put sock host &(String.concat &[@"/" @box @"/speakers/" (Int.str speaker) @"/volume/up"]) [auth date] "")]
+  (let [datestr &(RFC-1123-date (Long.from-int (System.time)))
+        signature (HmacSha1.digest app-secret &(String.concat &[@"volume-up/" @box @"/speakers/" (Int.str speaker) @"/volume/up" @datestr]))
+        auth (String.join @": " &[@"Authorization" (String.concat &[@app-key @":" signature])])
+        date (String.join @": " &[@"Date" @datestr])
+        result &(put sock @host (String.concat &[@"/" @box @"/speakers/" (Int.str speaker) @"/volume/up"]) &[auth date] @"")]
     (print-response result)))
 
 (defn volume-down [sock host box speaker]
-  (let [signature (HmacSha1.digest app-secret &(String.concat &[@"volume-down/" @box @"/speakers/" (Int.str speaker) @"/volume/down"]))
-        auth (HttpHeader.init @"Authorization" (String.concat &[@app-key @":" signature]))
-        date (HttpHeader.init @"Date" @"")
-        result &(put sock host &(String.concat &[@"/" @box @"/speakers/" (Int.str speaker) @"/volume/down"]) [auth date] "")]
+  (let [datestr &(RFC-1123-date (Long.from-int (System.time)))
+        signature (HmacSha1.digest app-secret &(String.concat &[@"volume-down/" @box @"/speakers/" (Int.str speaker) @"/volume/down" @datestr]))
+        auth (String.join @": " &[@"Authorization" (String.concat &[@app-key @":" signature])])
+        date (String.join @": " &[@"Date" @datestr])
+        result &(put sock @host (String.concat &[@"/" @box @"/speakers/" (Int.str speaker) @"/volume/down"]) &[auth date] @"")]
+    (print-response result)))
+
+(defn volume [sock host box speaker vol]
+  (let [datestr &(RFC-1123-date (Long.from-int (System.time)))
+        signature (HmacSha1.digest app-secret &(String.concat &[@"volume/" @box @"/speakers/" (Int.str speaker) @"/volume/" (Int.str vol) @datestr]))
+        auth (String.join @": " &[@"Authorization" (String.concat &[@app-key @":" signature])])
+        date (String.join @": " &[@"Date" @datestr])
+        result &(put sock @host (String.concat &[@"/" @box @"/speakers/" (Int.str speaker) @"/volume/" (Int.str vol)]) &[auth date] @"")]
     (print-response result)))
 
 (defn config-network [sock host box heart-rate timeout]
-  (let [body &(String.concat &[@"network-heart-rate=" (Int.str heart-rate) @"&network-timeout=" (Int.str timeout)])
-        signature (HmacSha1.digest app-secret &(String.concat &[@"config-network/" @box @"/network/" @body]))
-        auth (HttpHeader.init @"Authorization" (String.concat &[@app-key @":" signature]))
-        date (HttpHeader.init @"Date" @"")
-        result &(post sock host &(String.concat &[@"/" @box @"/network"]) [(HttpHeader.init @"Content-Type" @"application/x-www-form-urlencoded") auth date] body)]
+  (let [datestr &(RFC-1123-date (Long.from-int (System.time)))
+        body &(String.concat &[@"network-heart-rate=" (Int.str heart-rate) @"&network-timeout=" (Int.str timeout)])
+        signature (HmacSha1.digest app-secret &(String.concat &[@"config-network/" @box @"/network/" @body @datestr]))
+        auth (String.join @": " &[@"Authorization" (String.concat &[@app-key @":" signature])])
+        date (String.join @": " &[@"Date" @datestr])
+        content-type @"Content-Type: application/x-www-form-urlencoded"
+        result &(post sock @host (String.concat &[@"/" @box @"/network"]) &[content-type auth date] @body)]
     (print-response result)))
 
 (defn token [sock host box board lock]
-  (let [signature (HmacSha1.digest app-secret &(String.concat &[@"get-token/" @box @"/token/" (Int.str board) @"/" (Int.str lock)]))
-        auth (HttpHeader.init @"Authorization" (String.concat &[@app-key @":" signature]))
-        date (HttpHeader.init @"Date" @"")
-        result &(get sock host &(String.concat &[@"/" @box @"/token/" (Int.str board) @"/" (Int.str lock)]) [auth date])]
+  (let [datestr &(RFC-1123-date (Long.from-int (System.time)))
+        signature (HmacSha1.digest app-secret &(String.concat &[@"get-token/" @box @"/token/" (Int.str board) @"/" (Int.str lock) @datestr]))
+        auth (String.join @": " &[@"Authorization" (String.concat &[@app-key @":" signature])])
+        date (String.join @": " &[@"Date" @datestr])
+        result &(get sock @host (String.concat &[@"/" @box @"/token/" (Int.str board) @"/" (Int.str lock)]) &[auth date])]
     (print-response result)))
 
 (defn tokens [sock host box board locks]
-  (let [lockstr &(String.suffix-string &(String.concat &(Array.copy-map comma-join-lock (the &(Array Int) locks))) 1)
-        signature (HmacSha1.digest app-secret &(String.concat &[@"get-token/" @box @"/token/" (Int.str board) @"/" @lockstr]))
-        auth (HttpHeader.init @"Authorization" (String.concat &[@app-key @":" signature]))
-        date (HttpHeader.init @"Date" @"")
-        result &(get sock host &(String.concat &[@"/" @box @"/token/" (Int.str board) @"/" @lockstr]) [auth date])]
+  (let [datestr &(RFC-1123-date (Long.from-int (System.time)))
+        lockstr &(String.suffix-string &(String.concat &(Array.copy-map comma-join-lock (the &(Array Int) locks))) 1)
+        signature (HmacSha1.digest app-secret &(String.concat &[@"get-token/" @box @"/token/" (Int.str board) @"/" @lockstr @datestr]))
+        auth (String.join @": " &[@"Authorization" (String.concat &[@app-key @":" signature])])
+        date (String.join @": " &[@"Date" @datestr])
+        result &(get sock @host (String.concat &[@"/" @box @"/token/" (Int.str board) @"/" @lockstr]) &[auth date])]
     (print-response result)))
 
 (defn online [sock host box]
-  (let [signature (HmacSha1.digest app-secret &(String.concat &[@"online-detect/" @box]))
-        auth (HttpHeader.init @"Authorization" (String.concat &[@app-key @":" signature]))
-        date (HttpHeader.init @"Date" @"")
-        result &(get sock host &(String.concat &[@"/" @box]) [auth date])]
+  (let [datestr &(RFC-1123-date (Long.from-int (System.time)))
+        signature (HmacSha1.digest app-secret &(String.concat &[@"online-detect/" @box @datestr]))
+        auth (String.join @": " &[@"Authorization" (String.concat &[@app-key @":" signature])])
+        date (String.join @": " &[@"Date" @datestr])
+        result &(get sock @host (String.concat &[@"/" @box]) &[auth date])]
     (print-response result)))
 
 (defn ping [sock host box]
-  (let [signature (HmacSha1.digest app-secret &(String.concat &[@"ping/" @box]))
-        auth (HttpHeader.init @"Authorization" (String.concat &[@app-key @":" signature]))
-        date (HttpHeader.init @"Date" @"")
-        result &(put sock host &(String.concat &[@"/" @box]) [auth date] "")]
+  (let [datestr &(RFC-1123-date (Long.from-int (System.time)))
+        signature (HmacSha1.digest app-secret &(String.concat &[@"ping/" @box @datestr]))
+        auth (String.join @": " &[@"Authorization" (String.concat &[@app-key @":" signature])])
+        date (String.join @": " &[@"Date" @datestr])
+        result &(put sock @host (String.concat &[@"/" @box]) &[auth date] @"")]
     (print-response result)))
 
 (defn do-work [context]
@@ -248,6 +279,8 @@
           (volume-up sock host box @(Context.speaker context))
           (String.= cmd "volume-down")
           (volume-down sock host box @(Context.speaker context))
+          (String.= cmd "volume")
+          (volume sock host box @(Context.speaker context) @(Context.volume context))
           (String.= cmd "config-network")
           (config-network sock host box @(Context.heart-rate context) @(Context.timeout context))
           (String.= cmd "token")
@@ -286,11 +319,14 @@
     (println "  fan-off")
     (println "  play")
     (println "           -speaker <number>                (1~8)")
-    (println "           -audio <number>                  (1~255)")
+    (println "           -audio <number>                  (1~9999)")
     (println "  volume-up")
-    (println "           -speaker <number>                (1~8)")
+    (println "           -speaker <number>                (1~8 or 255)")
     (println "  volume-down")
-    (println "           -speaker <number>                (1~8)")
+    (println "           -speaker <number>                (1~8 or 255)")
+    (println "  volume")
+    (println "           -speaker <number>                (1~8 or 255)")
+    (println "           -volume <number>                 (0~31)")
     (println "  config-network")
     (println "           -heart-rate <number>             [15, 31, 63, 127, 255]")
     (println "           -timeout <number>                (600~90000)")
@@ -314,6 +350,9 @@
 
 (defn audio-in-region? [audio]
   (and (> audio 0) (< audio 10000)))
+
+(defn volume-in-region? [speaker]
+  (and (>= speaker 0) (< speaker 32)))
 
 (defn heart-rate-in-region? [heart-rate]
   (or* (= heart-rate 15) (= heart-rate 31) (= heart-rate 63) (= heart-rate 127) (= heart-rate 255)))
@@ -345,6 +384,9 @@
           (speaker-in-region? @(Context.speaker context)))
         (and* (String.= "volume-down" cmd)
           (speaker-in-region? @(Context.speaker context)))
+        (and* (String.= "volume" cmd)
+          (speaker-in-region? @(Context.speaker context))
+          (volume-in-region? @(Context.volume context)))
         (and* (String.= "config-network" cmd)
           (heart-rate-in-region? @(Context.heart-rate context))
           (timeout-in-region? @(Context.timeout context)))
@@ -395,6 +437,8 @@
         (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
         (String.= "play" arg)
         (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
+        (String.= "volume" arg)
+        (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
         (String.= "volume-up" arg)
         (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
         (String.= "volume-down" arg)
@@ -434,12 +478,14 @@
                   (parse-args-recursive (Context.set-heart-rate context (Int.from-string value)) args (+ i 2))
                   (String.= "timeout" param)
                   (parse-args-recursive (Context.set-timeout context (Int.from-string value)) args (+ i 2))
+                  (String.= "volume" param)
+                  (parse-args-recursive (Context.set-volume context (Int.from-string value)) args (+ i 2))
                   (parse-args-recursive context args (+ i 2))))
               (parse-args-recursive context args (+ i 1))))
           (parse-args-recursive context args (+ i 1)))))))
 
 (defn parse-args [prog args]
-  (let-do [context &(Context.init @prog @"palbox.fengchaohuzhu.com" 5080 @"" @"" 0 0 [0 0] 255 0 31 9000)
+  (let-do [context &(Context.init @prog @"palbox.fengchaohuzhu.com" 5080 @"" @"" 0 0 [0 0] 255 0 31 9000 15)
            parsed &(parse-args-recursive @context args 0)]
     (if (verify-context parsed)
       (do-work parsed)

@@ -1,6 +1,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <fcntl.h>
+#include <time.h>
 #include <core.h>
 #include <carp_memory.h>
 
@@ -42,5 +43,14 @@ Array System_arguments() {
       }
     }
   }
+  return result;
+}
+
+String System_strftime(String * fmt, long time) {
+  struct tm t;
+  gmtime_r(&time, &t);
+  String result = CARP_MALLOC(1024);
+  memset(result, 0, 1024);
+  strftime(result, 1023, *fmt, &t);
   return result;
 }

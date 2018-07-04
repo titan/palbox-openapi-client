@@ -35,6 +35,7 @@ Socket Socket_setup_MINUS_client(String * node, int port) {
 
   ret.socket = socket(addr->ai_family, addr->ai_socktype, addr->ai_protocol);
   if (ret.socket == -1) {
+    freeaddrinfo(addr);
     perror("socket");
     exit(-1);
   }
