@@ -65,14 +65,14 @@
 
 (defn put [sock host path headers body]
   (let-do [headerstr (String.join @"\r\n" headers)
-           request &(String.concat &[@"PUT " path @" HTTP/1.1\r\nHost: " host @"\r\nContent-Length: " (Int.str (String.length &body)) @"\r\n" headerstr @"\r\n" body])]
+           request &(String.concat &[@"PUT " path @" HTTP/1.1\r\nHost: " host @"\r\nContent-Length: " (Int.str (String.length &body)) @"\r\n" headerstr @"\r\n\r\n" body])]
     (Socket.send sock request)
     (print-request request)
     (Socket.read sock)))
 
 (defn post [sock host path headers body]
   (let-do [headerstr (String.join @"\r\n" headers)
-           request &(String.concat &[@"POST " path @" HTTP/1.1\r\nHost: " host @"\r\nContent-Length: " (Int.str (String.length &body)) @"\r\n" headerstr @"\r\n" body])]
+           request &(String.concat &[@"POST " path @" HTTP/1.1\r\nHost: " host @"\r\nContent-Length: " (Int.str (String.length &body)) @"\r\n" headerstr @"\r\n\r\n" body])]
     (Socket.send sock request)
     (print-request request)
     (Socket.read sock)))
@@ -104,6 +104,14 @@
         auth (String.join @": " &[@"Authorization" (String.concat &[@app-key @":" signature])])
         date (String.join @": " &[@"Date" @datestr])
         result &(get sock @host (String.concat &[@"/" @box @"/locks/" (Int.str board) @"/" (Int.str lock)]) &[auth date])]
+    (print-response result)))
+
+(defn lock-off-and-status [sock host box board lock]
+  (let [datestr &(RFC-1123-date (Long.from-int (System.time)))
+        signature (HmacSha1.digest app-secret &(String.concat &[@"lock-off-and-status/" @box @"/lock-off-and-status/" (Int.str board) @"/" (Int.str lock) @datestr]))
+        auth (String.join @": " &[@"Authorization" (String.concat &[@app-key @":" signature])])
+        date (String.join @": " &[@"Date" @datestr])
+        result &(put sock @host (String.concat &[@"/" @box @"/lock-off-and-status/" (Int.str board) @"/" (Int.str lock)]) &[auth date] @"")]
     (print-response result)))
 
 (defn light-on [sock host box]
@@ -257,6 +265,8 @@
           (locks-off sock host box @(Context.board context) (Context.locks context))
           (String.= cmd "lock-status")
           (lock-status sock host box @(Context.board context) @(Context.lock context))
+          (String.= cmd "lock-off-and-status")
+          (lock-off-and-status sock host box @(Context.board context) @(Context.lock context))
           (String.= cmd "light-on")
           (light-on sock host box)
           (String.= cmd "light-off")
@@ -307,6 +317,9 @@
     (println "           -board <number>                  (1~8)")
     (println "           -locks <number1>,<number2>       (1~20)")
     (println "  lock-status")
+    (println "           -board <number>                  (1~8)")
+    (println "           -lock <number>                   (1~20)")
+    (println "  lock-off-and-status")
     (println "           -board <number>                  (1~8)")
     (println "           -lock <number>                   (1~20)")
     (println "  light-on")
@@ -370,13 +383,16 @@
       (or* (and* (String.= "lock-off" cmd)
              (board-in-region? @(Context.board context))
              (lock-in-region? @(Context.lock context)))
-        (and* (String.= "lock-status" cmd)
-          (board-in-region? @(Context.board context))
-          (lock-in-region? @(Context.lock context)))
         (and* (String.= "locks-off" cmd)
           (board-in-region? @(Context.board context))
           (> (Array.length (Context.locks context)) 0)
           (Array.reduce reduce-lock-in-region true (Context.locks context)))
+        (and* (String.= "lock-status" cmd)
+          (board-in-region? @(Context.board context))
+          (lock-in-region? @(Context.lock context)))
+        (and* (String.= "lock-off-and-status" cmd)
+          (board-in-region? @(Context.board context))
+          (lock-in-region? @(Context.lock context)))
         (and* (String.= "play" cmd)
           (speaker-in-region? @(Context.speaker context))
           (audio-in-region? @(Context.audio context)))
@@ -418,6 +434,8 @@
         (String.= "locks-off" arg)
         (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
         (String.= "lock-status" arg)
+        (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
+        (String.= "lock-off-and-status" arg)
         (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
         (String.= "light-on" arg)
         (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
