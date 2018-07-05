@@ -85,12 +85,12 @@
         result &(put sock @host (String.concat &[@"/" @box @"/locks/" (Int.str board) @"/" (Int.str lock)]) &[auth date] @"")]
     (print-response result)))
 
-(defn comma-join-lock [lock]
-  (format ",%d" @(the &Int lock)))
+(defn int->string [i]
+  (Int.str @(the &Int i)))
 
 (defn locks-off [sock host box board locks]
   (let [datestr &(RFC-1123-date (Long.from-int (System.time)))
-        body &(String.concat &[@"locks=" (String.suffix-string &(String.concat &(Array.copy-map comma-join-lock (the &(Array Int) locks))) 1)])
+        body &(String.concat &[@"locks=" (String.join-with-char \, &(the (Array String) (Array.copy-map int->string (the &(Array Int) locks))))])
         signature (HmacSha1.digest app-secret &(String.concat &[@"locks-off/" @box @"/locks/" (Int.str board) @body @datestr]))
         auth (String.join @": " &[@"Authorization" (String.concat &[@app-key @":" signature])])
         date (String.join @": " &[@"Date" @datestr])
@@ -98,12 +98,13 @@
         result &(post sock @host (String.concat &[@"/" @box @"/locks/" (Int.str board)]) &[content-type auth date] @body)]
     (print-response result)))
 
-(defn lock-status [sock host box board lock]
+(defn lock-status [sock host box board locks]
   (let [datestr &(RFC-1123-date (Long.from-int (System.time)))
-        signature (HmacSha1.digest app-secret &(String.concat &[@"lock-status/" @box @"/locks/" (Int.str board) @"/" (Int.str lock) @datestr]))
+        lockstr &(String.join-with-char \, &(the (Array String) (Array.copy-map int->string (the &(Array Int) locks))))
+        signature (HmacSha1.digest app-secret &(String.concat &[@"lock-status/" @box @"/locks/" (Int.str board) @"/" @lockstr  @datestr]))
         auth (String.join @": " &[@"Authorization" (String.concat &[@app-key @":" signature])])
         date (String.join @": " &[@"Date" @datestr])
-        result &(get sock @host (String.concat &[@"/" @box @"/locks/" (Int.str board) @"/" (Int.str lock)]) &[auth date])]
+        result &(get sock @host (String.concat &[@"/" @box @"/locks/" (Int.str board) @"/" @lockstr]) &[auth date])]
     (print-response result)))
 
 (defn lock-off-and-status [sock host box board lock]
@@ -112,6 +113,16 @@
         auth (String.join @": " &[@"Authorization" (String.concat &[@app-key @":" signature])])
         date (String.join @": " &[@"Date" @datestr])
         result &(put sock @host (String.concat &[@"/" @box @"/lock-off-and-status/" (Int.str board) @"/" (Int.str lock)]) &[auth date] @"")]
+    (print-response result)))
+
+(defn locks-off-and-status [sock host box board locks]
+  (let [datestr &(RFC-1123-date (Long.from-int (System.time)))
+        body &(String.concat &[@"locks=" (String.join-with-char \, &(the (Array String) (Array.copy-map int->string (the &(Array Int) locks))))])
+        signature (HmacSha1.digest app-secret &(String.concat &[@"locks-off-and-status/" @box @"/lock-off-and-status/" (Int.str board) @body @datestr]))
+        auth (String.join @": " &[@"Authorization" (String.concat &[@app-key @":" signature])])
+        date (String.join @": " &[@"Date" @datestr])
+        content-type @"Content-Type: application/x-www-form-urlencoded"
+        result &(post sock @host (String.concat &[@"/" @box @"/lock-off-and-status/" (Int.str board)]) &[content-type auth date] @body)]
     (print-response result)))
 
 (defn light-on [sock host box]
@@ -230,7 +241,7 @@
 
 (defn tokens [sock host box board locks]
   (let [datestr &(RFC-1123-date (Long.from-int (System.time)))
-        lockstr &(String.suffix-string &(String.concat &(Array.copy-map comma-join-lock (the &(Array Int) locks))) 1)
+        lockstr &(String.join-with-char \, &(the (Array String) (Array.copy-map int->string (the &(Array Int) locks))))
         signature (HmacSha1.digest app-secret &(String.concat &[@"get-token/" @box @"/token/" (Int.str board) @"/" @lockstr @datestr]))
         auth (String.join @": " &[@"Authorization" (String.concat &[@app-key @":" signature])])
         date (String.join @": " &[@"Date" @datestr])
@@ -264,9 +275,14 @@
           (String.= cmd "locks-off")
           (locks-off sock host box @(Context.board context) (Context.locks context))
           (String.= cmd "lock-status")
-          (lock-status sock host box @(Context.board context) @(Context.lock context))
+          (if (> (Array.length (Context.locks context)) 1)
+            (lock-status sock host box @(Context.board context) (Context.locks context))
+            (lock-status sock host box @(Context.board context) &[@(Context.lock context)]))
+          ;; (lock-status sock host box @(Context.board context) &[@(Context.lock context)])
           (String.= cmd "lock-off-and-status")
           (lock-off-and-status sock host box @(Context.board context) @(Context.lock context))
+          (String.= cmd "locks-off-and-status")
+          (locks-off-and-status sock host box @(Context.board context) (Context.locks context))
           (String.= cmd "light-on")
           (light-on sock host box)
           (String.= cmd "light-off")
@@ -315,13 +331,17 @@
     (println "           -lock <number>                   (1~20)")
     (println "  locks-off")
     (println "           -board <number>                  (1~8)")
-    (println "           -locks <number1>,<number2>       (1~20)")
+    (println "           -locks <number1>,<number2>, ...  (1~20)")
     (println "  lock-status")
     (println "           -board <number>                  (1~8)")
     (println "           -lock <number>                   (1~20)")
+    (println "           -locks <number1>,<number2>, ...  (1~20)")
     (println "  lock-off-and-status")
     (println "           -board <number>                  (1~8)")
     (println "           -lock <number>                   (1~20)")
+    (println "  locks-off-and-status")
+    (println "           -board <number>                  (1~8)")
+    (println "           -locks <number1>,<number2>, ...  (1~20)")
     (println "  light-on")
     (println "  light-off")
     (println "  ultraviolet-on")
@@ -389,10 +409,16 @@
           (Array.reduce reduce-lock-in-region true (Context.locks context)))
         (and* (String.= "lock-status" cmd)
           (board-in-region? @(Context.board context))
-          (lock-in-region? @(Context.lock context)))
+          (or (lock-in-region? @(Context.lock context))
+            (and (> (Array.length (Context.locks context)) 0)
+              (Array.reduce reduce-lock-in-region true (Context.locks context)))))
         (and* (String.= "lock-off-and-status" cmd)
           (board-in-region? @(Context.board context))
           (lock-in-region? @(Context.lock context)))
+        (and* (String.= "locks-off-and-status" cmd)
+          (board-in-region? @(Context.board context))
+          (> (Array.length (Context.locks context)) 0)
+          (Array.reduce reduce-lock-in-region true (Context.locks context)))
         (and* (String.= "play" cmd)
           (speaker-in-region? @(Context.speaker context))
           (audio-in-region? @(Context.audio context)))
@@ -436,6 +462,8 @@
         (String.= "lock-status" arg)
         (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
         (String.= "lock-off-and-status" arg)
+        (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
+        (String.= "locks-off-and-status" arg)
         (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
         (String.= "light-on" arg)
         (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
@@ -503,7 +531,7 @@
           (parse-args-recursive context args (+ i 1)))))))
 
 (defn parse-args [prog args]
-  (let-do [context &(Context.init @prog @"palbox.fengchaohuzhu.com" 5080 @"" @"" 0 0 [0 0] 255 0 31 9000 15)
+  (let-do [context &(Context.init @prog @"palbox.fengchaohuzhu.com" 5080 @"" @"" 0 0 [] 255 0 31 9000 15)
            parsed &(parse-args-recursive @context args 0)]
     (if (verify-context parsed)
       (do-work parsed)
