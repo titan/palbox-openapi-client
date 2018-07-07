@@ -128,10 +128,18 @@
 
 (defn charger-status [sock host box charger]
   (let [datestr &(RFC-1123-date (Long.from-int (System.time)))
-        signature (HmacSha1.digest app-secret &(String.concat &[@"charger-status/" @box @"/chargers/" (Int.str charger)]))
+        signature (HmacSha1.digest app-secret &(String.concat &[@"charger-status/" @box @"/chargers/" (Int.str charger) @datestr]))
         auth (String.join @": " &[@"Authorization" (String.concat &[@app-key @":" signature])])
         date (String.join @": " &[@"Date" @datestr])
         result &(get sock @host (String.concat &[@"/" @box @"/chargers/" (Int.str charger)]) &[auth date])]
+    (print-response result)))
+
+(defn charger-config [sock host box charger]
+  (let [datestr &(RFC-1123-date (Long.from-int (System.time)))
+        signature (HmacSha1.digest app-secret &(String.concat &[@"charger-config/" @box @"/chargers/" (Int.str charger) @"/config" @datestr]))
+        auth (String.join @": " &[@"Authorization" (String.concat &[@app-key @":" signature])])
+        date (String.join @": " &[@"Date" @datestr])
+        result &(get sock @host (String.concat &[@"/" @box @"/chargers/" (Int.str charger) @"/config"]) &[auth date])]
     (print-response result)))
 
 (defn light-on [sock host box]
@@ -294,6 +302,8 @@
           (locks-off-and-status sock host box @(Context.board context) (Context.locks context))
           (String.= cmd "charger-status")
           (charger-status sock host box @(Context.charger context))
+          (String.= cmd "charger-config")
+          (charger-config sock host box @(Context.charger context))
           (String.= cmd "light-on")
           (light-on sock host box)
           (String.= cmd "light-off")
@@ -354,6 +364,8 @@
     (println "           -board <number>                  (1~8)")
     (println "           -locks <number1>,<number2>, ...  (1~20)")
     (println "  charger-status")
+    (println "           -charger <number>                (1~8)")
+    (println "  charger-config")
     (println "           -charger <number>                (1~8)")
     (println "  light-on")
     (println "  light-off")
@@ -437,6 +449,8 @@
           (Array.reduce reduce-lock-in-region true (Context.locks context)))
         (and (String.= "charger-status" cmd)
           (charger-in-region? @(Context.charger context)))
+        (and (String.= "charger-config" cmd)
+          (charger-in-region? @(Context.charger context)))
         (and* (String.= "play" cmd)
           (speaker-in-region? @(Context.speaker context))
           (audio-in-region? @(Context.audio context)))
@@ -484,6 +498,8 @@
         (String.= "locks-off-and-status" arg)
         (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
         (String.= "charger-status" arg)
+        (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
+        (String.= "charger-config" arg)
         (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
         (String.= "light-on" arg)
         (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
