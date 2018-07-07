@@ -39,6 +39,8 @@
      timeout Int
      volume Int
      charger Int
+     charging Int
+     heating Int
      ])
 
 (defn RFC-1123-date [t]
@@ -140,6 +142,16 @@
         auth (String.join @": " &[@"Authorization" (String.concat &[@app-key @":" signature])])
         date (String.join @": " &[@"Date" @datestr])
         result &(get sock @host (String.concat &[@"/" @box @"/chargers/" (Int.str charger) @"/config"]) &[auth date])]
+    (print-response result)))
+
+(defn config-charger [sock host box charger charging heating]
+  (let [datestr &(RFC-1123-date (Long.from-int (System.time)))
+        body &(String.concat &[@"enable-charging=" (Int.str charging) @"&enable-heating=" (Int.str heating)])
+        signature (HmacSha1.digest app-secret &(String.concat &[@"config-charger/" @box @"/chargers/" (Int.str charger) @body @datestr]))
+        auth (String.join @": " &[@"Authorization" (String.concat &[@app-key @":" signature])])
+        date (String.join @": " &[@"Date" @datestr])
+        content-type @"Content-Type: application/x-www-form-urlencoded"
+        result &(post sock @host (String.concat &[@"/" @box @"/chargers/" (Int.str charger)]) &[content-type auth date] @body)]
     (print-response result)))
 
 (defn light-on [sock host box]
@@ -304,6 +316,8 @@
           (charger-status sock host box @(Context.charger context))
           (String.= cmd "charger-config")
           (charger-config sock host box @(Context.charger context))
+          (String.= cmd "config-charger")
+          (config-charger sock host box @(Context.charger context) @(Context.charging context) @(Context.heating context))
           (String.= cmd "light-on")
           (light-on sock host box)
           (String.= cmd "light-off")
@@ -367,6 +381,10 @@
     (println "           -charger <number>                (1~8)")
     (println "  charger-config")
     (println "           -charger <number>                (1~8)")
+    (println "  config-charger")
+    (println "           -charger <number>                (1~8)")
+    (println "           -charging <number>               (0~15)")
+    (println "           -heating <number>                (0~15)")
     (println "  light-on")
     (println "  light-off")
     (println "  ultraviolet-on")
@@ -405,6 +423,12 @@
 
 (defn charger-in-region? [charger]
   (and (> charger 0) (< charger 9)))
+
+(defn charging-in-region? [charging]
+  (and (>= charging 0) (< charging 16)))
+
+(defn heating-in-region? [heating]
+  (and (>= heating 0) (< heating 16)))
 
 (defn speaker-in-region? [speaker]
   (or (and (> speaker 0) (< speaker 9)) (= speaker 255)))
@@ -451,6 +475,10 @@
           (charger-in-region? @(Context.charger context)))
         (and (String.= "charger-config" cmd)
           (charger-in-region? @(Context.charger context)))
+        (and* (String.= "config-charger" cmd)
+          (charger-in-region? @(Context.charger context))
+          (charging-in-region? @(Context.charging context))
+          (heating-in-region? @(Context.heating context)))
         (and* (String.= "play" cmd)
           (speaker-in-region? @(Context.speaker context))
           (audio-in-region? @(Context.audio context)))
@@ -501,6 +529,8 @@
         (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
         (String.= "charger-config" arg)
         (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
+        (String.= "config-charger" arg)
+        (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
         (String.= "light-on" arg)
         (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
         (String.= "light-off" arg)
@@ -548,6 +578,10 @@
                   (parse-args-recursive (Context.set-locks context (Array.copy-map Int.from-string &(String.split-by value &[\,]))) args (+ i 2))
                   (String.= "charger" param)
                   (parse-args-recursive (Context.set-charger context (Int.from-string value)) args (+ i 2))
+                  (String.= "charging" param)
+                  (parse-args-recursive (Context.set-charging context (Int.from-string value)) args (+ i 2))
+                  (String.= "heating" param)
+                  (parse-args-recursive (Context.set-heating context (Int.from-string value)) args (+ i 2))
                   (String.= "speaker" param)
                   (parse-args-recursive (Context.set-speaker context (Int.from-string value)) args (+ i 2))
                   (String.= "audio" param)
@@ -569,7 +603,7 @@
           (parse-args-recursive context args (+ i 1)))))))
 
 (defn parse-args [prog args]
-  (let-do [context &(Context.init @prog @"palbox.fengchaohuzhu.com" 5080 @"" @"" 0 0 [] 255 0 31 9000 15 1)
+  (let-do [context &(Context.init @prog @"palbox.fengchaohuzhu.com" 5080 @"" @"" 0 0 [] 255 0 31 9000 15 1 0 0)
            parsed &(parse-args-recursive @context args 0)]
     (if (verify-context parsed)
       (do-work parsed)
