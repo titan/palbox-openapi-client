@@ -38,6 +38,7 @@
      heart-rate Int
      timeout Int
      volume Int
+     charger Int
      ])
 
 (defn RFC-1123-date [t]
@@ -123,6 +124,14 @@
         date (String.join @": " &[@"Date" @datestr])
         content-type @"Content-Type: application/x-www-form-urlencoded"
         result &(post sock @host (String.concat &[@"/" @box @"/lock-off-and-status/" (Int.str board)]) &[content-type auth date] @body)]
+    (print-response result)))
+
+(defn charger-status [sock host box charger]
+  (let [datestr &(RFC-1123-date (Long.from-int (System.time)))
+        signature (HmacSha1.digest app-secret &(String.concat &[@"charger-status/" @box @"/chargers/" (Int.str charger)]))
+        auth (String.join @": " &[@"Authorization" (String.concat &[@app-key @":" signature])])
+        date (String.join @": " &[@"Date" @datestr])
+        result &(get sock @host (String.concat &[@"/" @box @"/chargers/" (Int.str charger)]) &[auth date])]
     (print-response result)))
 
 (defn light-on [sock host box]
@@ -283,6 +292,8 @@
           (lock-off-and-status sock host box @(Context.board context) @(Context.lock context))
           (String.= cmd "locks-off-and-status")
           (locks-off-and-status sock host box @(Context.board context) (Context.locks context))
+          (String.= cmd "charger-status")
+          (charger-status sock host box @(Context.charger context))
           (String.= cmd "light-on")
           (light-on sock host box)
           (String.= cmd "light-off")
@@ -342,6 +353,8 @@
     (println "  locks-off-and-status")
     (println "           -board <number>                  (1~8)")
     (println "           -locks <number1>,<number2>, ...  (1~20)")
+    (println "  charger-status")
+    (println "           -charger <number>                (1~8)")
     (println "  light-on")
     (println "  light-off")
     (println "  ultraviolet-on")
@@ -377,6 +390,9 @@
 
 (defn lock-in-region? [lock]
   (and (> lock 0) (< lock 21)))
+
+(defn charger-in-region? [charger]
+  (and (> charger 0) (< charger 9)))
 
 (defn speaker-in-region? [speaker]
   (or (and (> speaker 0) (< speaker 9)) (= speaker 255)))
@@ -419,6 +435,8 @@
           (board-in-region? @(Context.board context))
           (> (Array.length (Context.locks context)) 0)
           (Array.reduce reduce-lock-in-region true (Context.locks context)))
+        (and (String.= "charger-status" cmd)
+          (charger-in-region? @(Context.charger context)))
         (and* (String.= "play" cmd)
           (speaker-in-region? @(Context.speaker context))
           (audio-in-region? @(Context.audio context)))
@@ -465,6 +483,8 @@
         (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
         (String.= "locks-off-and-status" arg)
         (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
+        (String.= "charger-status" arg)
+        (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
         (String.= "light-on" arg)
         (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
         (String.= "light-off" arg)
@@ -510,6 +530,8 @@
                   (parse-args-recursive (Context.set-lock context (Int.from-string value)) args (+ i 2))
                   (String.= "locks" param)
                   (parse-args-recursive (Context.set-locks context (Array.copy-map Int.from-string &(String.split-by value &[\,]))) args (+ i 2))
+                  (String.= "charger" param)
+                  (parse-args-recursive (Context.set-charger context (Int.from-string value)) args (+ i 2))
                   (String.= "speaker" param)
                   (parse-args-recursive (Context.set-speaker context (Int.from-string value)) args (+ i 2))
                   (String.= "audio" param)
@@ -531,7 +553,7 @@
           (parse-args-recursive context args (+ i 1)))))))
 
 (defn parse-args [prog args]
-  (let-do [context &(Context.init @prog @"palbox.fengchaohuzhu.com" 5080 @"" @"" 0 0 [] 255 0 31 9000 15)
+  (let-do [context &(Context.init @prog @"palbox.fengchaohuzhu.com" 5080 @"" @"" 0 0 [] 255 0 31 9000 15 1)
            parsed &(parse-args-recursive @context args 0)]
     (if (verify-context parsed)
       (do-work parsed)
