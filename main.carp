@@ -41,6 +41,9 @@
      charger Int
      charging Int
      heating Int
+     egg Int
+     cabin Int
+     gpio Int
      ])
 
 (defn RFC-1123-date [t]
@@ -293,6 +296,46 @@
         result &(put sock @host (String.concat &[@"/" @box]) &[auth date] @"")]
     (print-response result)))
 
+(defn egg-lock-off [sock host box egg cabin]
+  (let [datestr &(RFC-1123-date (Long.from-int (System.time)))
+        signature (HmacSha1.digest app-secret &(String.concat &[@"egg-lock-off/" @box @"/eggs/" (Int.str egg) @"/" (Int.str cabin) @"/off" @datestr]))
+        auth (String.join @": " &[@"Authorization" (String.concat &[@app-key @":" signature])])
+        date (String.join @": " &[@"Date" @datestr])
+        result &(put sock @host (String.concat &[@"/" @box @"/eggs/" (Int.str egg) @"/" (Int.str cabin) @"/off"]) &[auth date] @"")]
+    (print-response result)))
+
+(defn egg-lock-on [sock host box egg cabin]
+  (let [datestr &(RFC-1123-date (Long.from-int (System.time)))
+        signature (HmacSha1.digest app-secret &(String.concat &[@"egg-lock-on/" @box @"/eggs/" (Int.str egg) @"/" (Int.str cabin) @"/on" @datestr]))
+        auth (String.join @": " &[@"Authorization" (String.concat &[@app-key @":" signature])])
+        date (String.join @": " &[@"Date" @datestr])
+        result &(put sock @host (String.concat &[@"/" @box @"/eggs/" (Int.str egg) @"/" (Int.str cabin) @"/on"]) &[auth date] @"")]
+    (print-response result)))
+
+(defn egg-play [sock host box egg audio]
+  (let [datestr &(RFC-1123-date (Long.from-int (System.time)))
+        signature (HmacSha1.digest app-secret &(String.concat &[@"egg-play/" @box @"/eggs/" (Int.str egg) @"/audios/" (Int.str audio) @datestr]))
+        auth (String.join @": " &[@"Authorization" (String.concat &[@app-key @":" signature])])
+        date (String.join @": " &[@"Date" @datestr])
+        result &(put sock @host (String.concat &[@"/" @box @"/eggs/" (Int.str egg) @"/audios/" (Int.str audio)]) &[auth date] @"")]
+    (print-response result)))
+
+(defn egg-gpio [sock host box egg gpio]
+  (let [datestr &(RFC-1123-date (Long.from-int (System.time)))
+        signature (HmacSha1.digest app-secret &(String.concat &[@"egg-gpio/" @box @"/eggs/" (Int.str egg) @"/gpio/" (Int.str gpio) @datestr]))
+        auth (String.join @": " &[@"Authorization" (String.concat &[@app-key @":" signature])])
+        date (String.join @": " &[@"Date" @datestr])
+        result &(put sock @host (String.concat &[@"/" @box @"/eggs/" (Int.str egg) @"/gpio/" (Int.str gpio)]) &[auth date] @"")]
+    (print-response result)))
+
+(defn egg-volume [sock host box egg vol]
+  (let [datestr &(RFC-1123-date (Long.from-int (System.time)))
+        signature (HmacSha1.digest app-secret &(String.concat &[@"egg-volume/" @box @"/eggs/" (Int.str egg) @"/volume/" (Int.str vol) @datestr]))
+        auth (String.join @": " &[@"Authorization" (String.concat &[@app-key @":" signature])])
+        date (String.join @": " &[@"Date" @datestr])
+        result &(put sock @host (String.concat &[@"/" @box @"/eggs/" (Int.str egg) @"/volume/" (Int.str vol)]) &[auth date] @"")]
+    (print-response result)))
+
 (defn do-work [context]
   (let-do [host (Context.host context)]
     (Socket.with-client sock host @(Context.port context)
@@ -352,6 +395,16 @@
           (online sock host box)
           (String.= cmd "ping")
           (ping sock host box)
+          (String.= cmd "egg-lock-on")
+          (egg-lock-on sock host box @(Context.egg context) @(Context.cabin context))
+          (String.= cmd "egg-lock-off")
+          (egg-lock-off sock host box @(Context.egg context) @(Context.cabin context))
+          (String.= cmd "egg-play")
+          (egg-play sock host box @(Context.egg context) @(Context.audio context))
+          (String.= cmd "egg-gpio")
+          (egg-gpio sock host box @(Context.egg context) @(Context.gpio context))
+          (String.= cmd "egg-volume")
+          (egg-volume sock host box @(Context.egg context) @(Context.volume context))
           (println "Uknown cmd"))))))
 
 (defn usage [prog]
@@ -413,7 +466,22 @@
     (println "           -board <number>                  (1~8)")
     (println "           -locks <number1>,<number2>       (1~20)")
     (println "  online")
-    (println "  ping")))
+    (println "  ping")
+    (println "  egg-lock-on")
+    (println "           -egg <number>                    (1~8)")
+    (println "           -cabin <number>                  (1~16)")
+    (println "  egg-lock-off")
+    (println "           -egg <number>                    (1~8)")
+    (println "           -cabin <number>                  (1~16)")
+    (println "  egg-play")
+    (println "           -egg <number>                    (1~8)")
+    (println "           -audio <number>                  (1~9999)")
+    (println "  egg-gpio")
+    (println "           -egg <number>                    (1~8)")
+    (println "           -gpio <number>                   (0~15)")
+    (println "  egg-volume")
+    (println "           -egg <number>                    (1~8 or 255)")
+    (println "           -volume <number>                 (0~31)")))
 
 (defn board-in-region? [board]
   (and (> board 0) (< board 9)))
@@ -447,6 +515,15 @@
 
 (defn reduce-lock-in-region [acc lock]
   (and @acc (lock-in-region? @lock)))
+
+(defn egg-in-region? [egg]
+  (and (> egg 0) (< egg 9)))
+
+(defn cabin-in-region? [cabin]
+  (and (> cabin 0) (< cabin 17)))
+
+(defn gpio-in-region? [gpio]
+  (and (>= gpio 0) (< gpio 16)))
 
 (defn verify-context [context]
   (let [cmd (Context.cmd context)]
@@ -499,6 +576,21 @@
           (board-in-region? @(Context.board context))
           (> (Array.length (Context.locks context)) 0)
           (Array.reduce reduce-lock-in-region true (Context.locks context)))
+        (and* (String.= "egg-lock-on" cmd)
+          (egg-in-region? @(Context.egg context))
+          (cabin-in-region? @(Context.cabin context)))
+        (and* (String.= "egg-lock-off" cmd)
+          (egg-in-region? @(Context.egg context))
+          (cabin-in-region? @(Context.cabin context)))
+        (and* (String.= "egg-play" cmd)
+          (egg-in-region? @(Context.egg context))
+          (audio-in-region? @(Context.audio context)))
+        (and* (String.= "egg-gpio" cmd)
+          (egg-in-region? @(Context.egg context))
+          (gpio-in-region? @(Context.gpio context)))
+        (and* (String.= "egg-volume" cmd)
+          (egg-in-region? @(Context.egg context))
+          (volume-in-region? @(Context.volume context)))
         (String.= "light-on" cmd)
         (String.= "light-off" cmd)
         (String.= "ultraviolet-on" cmd)
@@ -565,6 +657,16 @@
         (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
         (String.= "ping" arg)
         (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
+        (String.= "egg-lock-on" arg)
+        (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
+        (String.= "egg-lock-off" arg)
+        (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
+        (String.= "egg-play" arg)
+        (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
+        (String.= "egg-gpio" arg)
+        (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
+        (String.= "egg-volume" arg)
+        (parse-args-recursive (Context.set-cmd context @arg) args (+ i 1))
         (if (String.starts-with? arg "-")
           (let [param &(String.suffix-string arg 1)]
             (if (> (- (Array.length args) i) 1)
@@ -598,12 +700,18 @@
                   (parse-args-recursive (Context.set-timeout context (Int.from-string value)) args (+ i 2))
                   (String.= "volume" param)
                   (parse-args-recursive (Context.set-volume context (Int.from-string value)) args (+ i 2))
+                  (String.= "egg" param)
+                  (parse-args-recursive (Context.set-egg context (Int.from-string value)) args (+ i 2))
+                  (String.= "cabin" param)
+                  (parse-args-recursive (Context.set-cabin context (Int.from-string value)) args (+ i 2))
+                  (String.= "gpio" param)
+                  (parse-args-recursive (Context.set-gpio context (Int.from-string value)) args (+ i 2))
                   (parse-args-recursive context args (+ i 2))))
               (parse-args-recursive context args (+ i 1))))
           (parse-args-recursive context args (+ i 1)))))))
 
 (defn parse-args [prog args]
-  (let-do [context &(Context.init @prog @"palbox.fengchaohuzhu.com" 5080 @"" @"" 0 0 [] 255 0 31 9000 15 1 0 0)
+  (let-do [context &(Context.init @prog @"palbox.fengchaohuzhu.com" 5080 @"" @"" 0 0 [] 255 0 31 9000 15 1 0 0 1 1 0)
            parsed &(parse-args-recursive @context args 0)]
     (if (verify-context parsed)
       (do-work parsed)
